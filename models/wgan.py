@@ -128,39 +128,38 @@ class ResidualBlock(nn.Module):
 
         return shortcut + output
 
-
+"""
 class GoodGenerator(nn.Module):
-    def __init__(self, dim=64, output_dim=3*64*64):
+    def __init__(self, dim=64):
         super(GoodGenerator, self).__init__()
-
         self.dim = dim
 
-        self.ssize = self.dim // 16
-        self.ln1 = nn.Linear(128, self.ssize*self.ssize*8*self.dim)
-        self.rb1 = ResidualBlock(8*self.dim, 8*self.dim, 3, resample = 'up')
-        self.rb2 = ResidualBlock(8*self.dim, 4*self.dim, 3, resample = 'up')
-        self.rb3 = ResidualBlock(4*self.dim, 2*self.dim, 3, resample = 'up')
-        self.rb4 = ResidualBlock(2*self.dim, 1*self.dim, 3, resample = 'up')
-        self.bn  = nn.BatchNorm2d(self.dim)
+        # Example: simple encoder-decoder structure for denoising
+        self.enc1 = nn.Conv2d(3, dim, 3, padding=1)
+        self.enc2 = nn.Conv2d(dim, 2*dim, 3, padding=1)
+        self.enc3 = nn.Conv2d(2*dim, 4*dim, 3, padding=1)
+        self.enc4 = nn.Conv2d(4*dim, 8*dim, 3, padding=1)
 
-        self.conv1 = MyConvo2d(1*self.dim, 3, 3)
+        self.dec1 = nn.ConvTranspose2d(8*dim, 4*dim, 3, stride=1, padding=1)
+        self.dec2 = nn.ConvTranspose2d(4*dim, 2*dim, 3, stride=1, padding=1)
+        self.dec3 = nn.ConvTranspose2d(2*dim, dim, 3, stride=1, padding=1)
+        self.dec4 = nn.Conv2d(dim, 3, 3, padding=1)
+
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
 
-    def forward(self, input):
-        output = self.ln1(input.contiguous())
-        output = output.view(-1, 8*self.dim, self.ssize, self.ssize)
-        output = self.rb1(output)
-        output = self.rb2(output)
-        output = self.rb3(output)
-        output = self.rb4(output)
-
-        output = self.bn(output)
-        output = self.relu(output)
-        output = self.conv1(output)
-        output = self.tanh(output)
-        output = output.view(-1, 3 * self.dim * self.dim)
-        return output
+    def forward(self, x):
+        # Encoder
+        e1 = self.relu(self.enc1(x))
+        e2 = self.relu(self.enc2(e1))
+        e3 = self.relu(self.enc3(e2))
+        e4 = self.relu(self.enc4(e3))
+        # Decoder
+        d1 = self.relu(self.dec1(e4))
+        d2 = self.relu(self.dec2(d1))
+        d3 = self.relu(self.dec3(d2))
+        out = self.tanh(self.dec4(d3))
+        return out
 
 class GoodDiscriminator(nn.Module):
     def __init__(self, dim=64):
@@ -188,3 +187,51 @@ class GoodDiscriminator(nn.Module):
         output = self.ln1(output)
         output = output.view(-1)
         return output
+"""
+
+
+class GoodDiscriminator(nn.Module):
+    def __init__(self, dim=32):
+        super().__init__()
+        # Input: (batch, 3, 32, 32)
+        self.main = nn.Sequential(
+            nn.Conv2d(3, 32, 5, stride=2, padding=2),   # (batch, 32, 16, 16)
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(32, 64, 5, stride=2, padding=2),  # (batch, 64, 8, 8)
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Flatten(),                               # (batch, 64*8*8)
+            nn.Linear(64*8*8, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(1024, 1)
+        )
+
+    def forward(self, x):
+        return self.main(x)
+    
+class GoodGenerator(nn.Module):
+    def __init__(self, dim=32):
+        super().__init__()
+        # Input: (batch, 3, 32, 32)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Sequential(
+            nn.Linear(3*32*32, 4*4*128),
+            nn.BatchNorm1d(4*4*128),
+            nn.ReLU(True)
+        )
+        self.deconv = nn.Sequential(
+            nn.Unflatten(1, (128, 4, 4)),                         # (batch, 128, 4, 4)
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),  # (batch, 64, 8, 8)
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),   # (batch, 32, 16, 16)
+            nn.BatchNorm2d(32),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1),    # (batch, 3, 32, 32)
+            nn.Tanh()  # Use Tanh if your images are normalized to [-1, 1]
+        )
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.fc(x)
+        x = self.deconv(x)
+        return x

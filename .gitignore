@@ -3,4 +3,7 @@ __pycache__/
 log.pkl
 runs/
 
+output/
+data/
+
 .venv/
